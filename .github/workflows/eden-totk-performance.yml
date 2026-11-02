@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      - name: Download WinNative build scripts
+      - name: Download WinNative source
         run: |
           set -euo pipefail
           curl -fL --retry 3 \
@@ -27,40 +27,44 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
+          sudo apt-get install -y \
             git ninja-build patchelf unzip curl \
-            python3-pip flex bison zip glslang-tools \
-            ccache clang llvm pkg-config
+            python3-pip python3-mako flex bison zip \
+            glslang-tools ccache clang llvm pkg-config \
+            libdrm-dev libexpat1-dev
           sudo python3 -m pip install \
             --break-system-packages \
             'meson>=1.4' mako
 
-      - name: Set up Android NDK r26d
-        id: ndk
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android NDK
+      - name: Download Android NDK r26d
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "ndk;26.3.11579264"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264" >> "$GITHUB_ENV"
+          set -euo pipefail
+          curl -fL --retry 3 \
+            https://dl.google.com/android/repository/android-ndk-r26d-linux.zip \
+            -o /tmp/android-ndk.zip
+          unzip -q /tmp/android-ndk.zip -d /opt
+          echo "ANDROID_NDK_HOME=/opt/android-ndk-r26d" >> "$GITHUB_ENV"
 
-      - name: Build maximum-performance Turnip
+      - name: Build Turnip Performance
         working-directory: Drivers-main
         env:
           BUILD_VERSION: Eden-TOTK
           BUILD_VARIANTS: p
         run: |
           set -euo pipefail
-          chmod +x build_wn_turnip.sh
+          chmod +x build_wn_turnip.sh build_turnip.sh
           ./build_wn_turnip.sh
 
-      - name: Locate and verify driver ZIP
-        if: success()
+      - name: Verify driver package
         run: |
-          find Drivers-main -type f -name '*.zip' -print
-          find Drivers-main -type f -name '*.zip' \
-            -exec unzip -t {} \;
+          set -euo pipefail
+          DRIVER="WN-Turnip-Eden-TOTK-p_Axxx.zip"
+          test -s "$DRIVER"
+          unzip -t "$DRIVER"
+          unzip -l "$DRIVER"
+          unzip -p "$DRIVER" meta.json
+          unzip -p "$DRIVER" libvulkan_freedreno.so \
+            | file -
 
       - name: Upload driver and logs
         if: always()
@@ -68,9 +72,8 @@ jobs:
         with:
           name: Eden-TOTK-Performance
           path: |
-            Drivers-main/**/*.zip
-            Drivers-main/*.zip
-            Drivers-main/*log*
+            WN-Turnip-Eden-TOTK-p_Axxx.zip
+            Drivers-main/build_log_p.txt
             Drivers-main/mesa_hash.txt
             Drivers-main/mesa_version.txt
           if-no-files-found: warn
